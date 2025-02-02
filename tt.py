@@ -4,16 +4,43 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 import subprocess
 import threading
+import sys
+import logging
+import traceback
+
+# Configure logging to write debug info to a file
+LOGFILE = "debug_log.txt"
+logging.basicConfig(
+    filename=LOGFILE,
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+
+def global_excepthook(exc_type, exc_value, exc_traceback):
+    """
+    Global exception hook to log uncaught exceptions.
+    This will record them into debug_log.txt, so if the app
+    is launched via double-click (with no console), issues
+    can still be tracked.
+    """
+    logging.error("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+
+# Set the global exception handler so all uncaught exceptions get logged.
+sys.excepthook = global_excepthook
 
 
 class YTDlpGUI(tk.Tk):
     """
-    A tkinter-based GUI for downloading videos using yt-dlp.
+    A tkinter-based GUI for downloading videos using yt-dlp,
+    with extra debug logging.
     """
 
     def __init__(self):
         super().__init__()
         self.title("Towel YT Downloader")
+        logging.info("Initializing Towel YT Downloader GUI")
 
         # Increase the window size and allow resizing
         self.geometry("650x400")
@@ -72,6 +99,7 @@ class YTDlpGUI(tk.Tk):
         """Prompt the user to choose a download folder."""
         folder = filedialog.askdirectory()
         if folder:
+            logging.debug(f"User selected folder: {folder}")
             self.download_dir_var.set(folder)
 
     def start_download(self):
@@ -84,12 +112,16 @@ class YTDlpGUI(tk.Tk):
         download_folder = self.download_dir_var.get().strip()
 
         if not url:
-            self.output_text.insert(tk.END, "Please enter a valid URL.\n")
+            msg = "Please enter a valid URL.\n"
+            logging.warning("No URL provided by the user.")
+            self.output_text.insert(tk.END, msg)
             return
 
         # Disable the button during download
         self.download_button.config(state=tk.DISABLED)
         self.output_text.delete("1.0", tk.END)
+
+        logging.info(f"Starting download. URL={url}, Format={fmt}, Folder={download_folder or 'Default'}")
 
         download_thread = threading.Thread(
             target=self.download_video,
@@ -102,30 +134,47 @@ class YTDlpGUI(tk.Tk):
         """
         Download the video using yt-dlp and capture the output.
         """
-        # If a download folder is chosen, pass it via --paths
+        # Build yt-dlp command
         command = ["yt-dlp", "-f", fmt]
         if folder:
             command += ["--paths", folder]
         command.append(url)
 
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
-        )
+        logging.debug(f"Executing command: {' '.join(command)}")
 
-        for line in process.stdout:
-            self.output_text.insert(tk.END, line)
-            self.output_text.see(tk.END)
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True
+            )
 
-        process.wait()
-        self.download_button.config(state=tk.NORMAL)
+            for line in process.stdout:
+                self.output_text.insert(tk.END, line)
+                self.output_text.see(tk.END)
+                logging.debug(line.strip())  # Log each line of yt-dlp output
+
+            process.wait()
+            rc = process.returncode
+            logging.info(f"Download completed with exit code {rc}")
+        except Exception as e:
+            err_msg = f"Exception during download: {e}"
+            logging.error(err_msg)
+            self.output_text.insert(tk.END, err_msg + "\n")
+        finally:
+            self.download_button.config(state=tk.NORMAL)
 
 
 def main():
+    logging.info("Launching Towel YT Downloader application")
     app = YTDlpGUI()
-    app.mainloop()
+    try:
+        app.mainloop()
+    except Exception:
+        logging.error("Exception in mainloop", exc_info=True)
+    finally:
+        logging.info("Application closed")
 
 
 if __name__ == "__main__":
